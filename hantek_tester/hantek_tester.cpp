@@ -15,7 +15,8 @@ constexpr size_t NR_ENABLED_CHANS = 4;
 constexpr int TRIGGER_CHANNEL = CH1;
 constexpr int TRIGGER_SLOPE = RISE;
 constexpr int TRIGGER_MODE = EDGE;
-constexpr int TRIGGER_COUPLE = DC;
+constexpr int TRIGGER_COUPLE = AC;
+constexpr int CHANNEL_COUPLING = AC;
 
 static
 WORD calibration_data[CAL_LEVEL_LEN];
@@ -23,7 +24,7 @@ WORD calibration_data[CAL_LEVEL_LEN];
 static
 WORD amp_level[AMPCALI_Len];
 
-short find_devs()
+short find_and_setup_devs()
 {
     short dev_info[MAX_USB_DEV_NUMBER];
     WORD nr_devs = dsoHTSearchDevice(dev_info);
@@ -51,8 +52,7 @@ short find_devs()
 
     if (1 == dsoHTDeviceConnect(dev_idx)) {
         std::cout << "Device is connected!" << std::endl;
-    }
-    else {
+    } else {
         std::cerr << "Device connection failure, aborting." << std::endl;
         nr_devs = 0;
         goto done;
@@ -66,7 +66,8 @@ short find_devs()
 
     fpga_version = dsoGetFPGAVersion(dev_idx);
     hard_version = dsoGetHardVersion(dev_idx);
-    std::cout << "FPGA version: 0x" << std::ios::hex <<  std::setw(4) << std::setfill('0') << fpga_version << " Hardware version: 0x" << hard_version << std::endl;
+
+    std::cout << "FPGA version: 0x" << std::ios::hex <<  std::setw(8) << std::setfill('0') << fpga_version << " Hardware version: 0x" << hard_version << std::endl;
 
     std::cout << "Initializing ADC" << std::endl;
 
@@ -77,6 +78,9 @@ short find_devs()
         std::cerr << "Failed to set ADC Channel Mod Gain, aborting." << std::endl;
         goto done;
     }
+
+    std::cout << "Set ADC mod gain, press any key to continue..." << std::endl;
+    getchar();
 
     // Read back the calibration data for the device
     if (0 == dsoHTReadCalibrationData(dev_idx, calibration_data, CAL_LEVEL_LEN)) {
@@ -130,7 +134,7 @@ short find_devs()
     for (size_t i = FIRST_ENABLED_CHAN; i < NR_ENABLED_CHANS; i++) {
         relay_control.bCHEnable[i] = 1;
         relay_control.nCHVoltDIV[i] = 8;
-        relay_control.nCHCoupling[i] = DC;
+        relay_control.nCHCoupling[i] = CHANNEL_COUPLING;
         relay_control.bCHBWLimit[i] = 0;
     }
     relay_control.nTrigSource = TRIGGER_CHANNEL;
@@ -148,7 +152,7 @@ short find_devs()
     control_data.nAlreadyReadLen = 0;
     control_data.nALT = 0;
 
-    std::cout << "Setting the DSO Sampling Rate" << std::endl;
+    std::cout << "Setting the DSO Sampling Rate, and normal mode for acquisition" << std::endl;
     if (0 == dsoHTSetSampleRate(dev_idx, amp_level, YT_NORMAL, &relay_control, &control_data)) {
         std::cerr << "Failed to set sample rate, aborting..." << std::endl;
         goto done;
@@ -184,11 +188,24 @@ done:
     return nr_devs;
 }
 
+int transfer_single_block()
+{
+    int ret = -1;
+
+    std::cout << "Setting up to transfer a single block..." << std::endl;
+
+    return ret;
+}
+
 int main()
 {
     std::cout<< "The Hantek Tester" << std::endl;
 
-    find_devs();
+    find_and_setup_devs();
+
+    std::cout << "Attempting to transfer a single block..." << std::endl;
+
+    transfer_single_block();
 
     return EXIT_SUCCESS;
 }
