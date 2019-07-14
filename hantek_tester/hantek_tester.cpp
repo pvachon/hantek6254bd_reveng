@@ -12,11 +12,14 @@
 
 constexpr size_t FIRST_ENABLED_CHAN = 0;
 constexpr size_t NR_ENABLED_CHANS = 4;
+constexpr size_t CHANS_MASK = 0xf;
 constexpr int TRIGGER_CHANNEL = CH1;
 constexpr int TRIGGER_SLOPE = RISE;
 constexpr int TRIGGER_MODE = EDGE;
 constexpr int TRIGGER_COUPLE = AC;
 constexpr int CHANNEL_COUPLING = AC;
+constexpr int TIME_PER_DIVISION = 16; // 500 uS
+constexpr int VOLTS_PER_DIVISION = 4; // 50 mV
 
 static
 WORD calibration_data[CAL_LEVEL_LEN];
@@ -24,7 +27,10 @@ WORD calibration_data[CAL_LEVEL_LEN];
 static
 WORD amp_level[AMPCALI_Len];
 
-short find_and_setup_devs()
+static
+short dev_idx = 0; // For now, assume we're just opening the first device we found.
+
+short find_and_setup_devs(PCONTROLDATA control_data)
 {
     short dev_info[MAX_USB_DEV_NUMBER];
     WORD nr_devs = dsoHTSearchDevice(dev_info);
@@ -33,15 +39,12 @@ short find_and_setup_devs()
         hard_version = 0;
 
     RELAYCONTROL relay_control;
-    CONTROLDATA control_data;
 
     std::cout << "Found " << nr_devs << " devices" << std::endl;
 
     for (size_t i = 0; i < nr_devs; i++) {
         std::cout << "    device: " << dev_info[i] << std::endl;
     }
-
-    short dev_idx = 0; // For now, assume we're just opening the first device we found.
 
     // This is broken?
     //if (FALSE == dsoSetUSBBus(dev_idx)) {
@@ -69,17 +72,18 @@ short find_and_setup_devs()
 
     std::cout << "FPGA version: 0x" << std::ios::hex <<  std::setw(8) << std::setfill('0') << fpga_version << " Hardware version: 0x" << hard_version << std::endl;
 
-    std::cout << "Initializing ADC" << std::endl;
+    std::cout << "Initializing ADC, press any key to go to the next step" << std::endl;
+    getchar();
 
     memset(calibration_data, 0, sizeof(calibration_data));
     
-    // Not sure what we're doing here, but I think this sets the ADC gain
-    if (0 == dsoHTADCCHModGain(dev_idx, 4)) {
+    // Set the ADC channel mode (1, 2 or 4)
+    if (0 == dsoHTADCCHModGain(dev_idx, NR_ENABLED_CHANS)) {
         std::cerr << "Failed to set ADC Channel Mod Gain, aborting." << std::endl;
         goto done;
     }
 
-    std::cout << "Set ADC mod gain, press any key to continue..." << std::endl;
+    std::cout << "Set ADC mode to 1, press any key to continue..." << std::endl;
     getchar();
 
     // Read back the calibration data for the device
@@ -88,7 +92,11 @@ short find_and_setup_devs()
         goto done;
     }
 
-    // Not sure what this is doing to the calibration data, yet
+    std::cout << "Read back calibration data, press any key to continue..." << std::endl;
+    getchar();
+
+    // Fill the calibration data in with magic numbers iff we don't have valid calibration data
+    // Never hit this in my test cases...
     if (calibration_data[CAL_LEVEL_LEN - 1] != ZERO_FLAG) {
         std::cout << "Preparing the calibration data " << std::endl;
 
@@ -133,7 +141,7 @@ short find_and_setup_devs()
     memset(reinterpret_cast<void *>(&relay_control), 0, sizeof(relay_control));
     for (size_t i = FIRST_ENABLED_CHAN; i < NR_ENABLED_CHANS; i++) {
         relay_control.bCHEnable[i] = 1;
-        relay_control.nCHVoltDIV[i] = 8;
+        relay_control.nCHVoltDIV[i] = VOLTS_PER_DIVISION;
         relay_control.nCHCoupling[i] = CHANNEL_COUPLING;
         relay_control.bCHBWLimit[i] = 0;
     }
@@ -141,38 +149,41 @@ short find_and_setup_devs()
     relay_control.bTrigFilt = 0;
     relay_control.nALT = 0;
 
-    control_data.nCHSet = 0xf; // FIXME
-    control_data.nTimeDIV = 12; // Wat
-    control_data.nTriggerSource = TRIGGER_CHANNEL;
-    control_data.nHTriggerPos = 50;
-    control_data.nVTriggerPos = 128;
-    control_data.nTriggerSlope = TRIGGER_SLOPE;
-    control_data.nBufferLen = BUF_4K_LEN;
-    control_data.nReadDataLen = BUF_4K_LEN;
-    control_data.nAlreadyReadLen = 0;
-    control_data.nALT = 0;
+    control_data->nCHSet = 0x1; // FIXME
+    control_data->nTimeDIV = TIME_PER_DIVISION; // Wat
+    control_data->nTriggerSource = TRIGGER_CHANNEL;
+    control_data->nHTriggerPos = 50;
+    control_data->nVTriggerPos = 180;
+    control_data->nTriggerSlope = TRIGGER_SLOPE;
+    control_data->nBufferLen = BUF_4K_LEN;
+    control_data->nReadDataLen = BUF_4K_LEN;
+    control_data->nAlreadyReadLen = 0;
+    control_data->nALT = 0;
 
     std::cout << "Setting the DSO Sampling Rate, and normal mode for acquisition" << std::endl;
-    if (0 == dsoHTSetSampleRate(dev_idx, amp_level, YT_NORMAL, &relay_control, &control_data)) {
+    if (0 == dsoHTSetSampleRate(dev_idx, amp_level, YT_NORMAL, &relay_control, control_data)) {
         std::cerr << "Failed to set sample rate, aborting..." << std::endl;
         goto done;
      }
 
+    std::cout << "Finished setting sample rate, press any key to continue..." << std::endl;
+    getchar();
+
     std::cout << "Setting CH and trigger" << std::endl;
-    if (0 == dsoHTSetCHAndTrigger(dev_idx, &relay_control, control_data.nTimeDIV)) {
-        std::cerr << "Failed to set time time division???" << std::endl;
+    if (0 == dsoHTSetCHAndTrigger(dev_idx, &relay_control, control_data->nTimeDIV)) {
+        std::cerr << "Failed to set relay control and channel details" << std::endl;
         goto done;
     }
 
     std::cout << "Setting RAM and trigger control" << std::endl;
-    if (0 == dsoHTSetRamAndTrigerControl(dev_idx, control_data.nTimeDIV, control_data.nCHSet, control_data.nTriggerSource, 0)) {
+    if (0 == dsoHTSetRamAndTrigerControl(dev_idx, control_data->nTimeDIV, control_data->nCHSet, control_data->nTriggerSource, 0)) {
         std::cerr << "Failed to set RAM and trigger control" << std::endl;
         goto done;
     }
 
     std::cout << "Setting each channel position to 0" << std::endl;
     for (size_t i = 0; i < MAX_CH_NUM; i++) {
-        if (0 == dsoHTSetCHPos(dev_idx, calibration_data, relay_control.nCHVoltDIV[i], 128, i, 4)) {
+        if (0 == dsoHTSetCHPos(dev_idx, calibration_data, relay_control.nCHVoltDIV[i], 128, i, NR_ENABLED_CHANS)) {
             std::cerr << "Failed to set channel position for channel " << i << std::endl;
             goto done;
         }
@@ -188,24 +199,54 @@ done:
     return nr_devs;
 }
 
-int transfer_single_block()
+int transfer_single_block(uint16_t *ch1, uint16_t *ch2, uint16_t *ch3, uint16_t *ch4, PCONTROLDATA control)
 {
     int ret = -1;
 
     std::cout << "Setting up to transfer a single block..." << std::endl;
 
+    if (1 != dsoHTGetData(dev_idx, ch1, ch2, ch3, ch4, control)) {
+        std::cerr << "Failed to get data from DSO, aborting." << std::endl;
+        goto done;
+    }
+
+    std::cout << "Transferred all 4 channels" << std::endl;
+done:
     return ret;
 }
 
 int main()
 {
+    CONTROLDATA control;
+
     std::cout<< "The Hantek Tester" << std::endl;
 
-    find_and_setup_devs();
+    memset(&control, 0, sizeof(control));
+
+    find_and_setup_devs(&control);
+
+    uint16_t* ch1 = new uint16_t[BUF_4K_LEN];
+    uint16_t* ch2 = new uint16_t[BUF_4K_LEN];
+    uint16_t* ch3 = new uint16_t[BUF_4K_LEN];
+    uint16_t* ch4 = new uint16_t[BUF_4K_LEN];
+
+    memset(ch1, 0, sizeof(uint16_t) * BUF_4K_LEN);
+    memset(ch2, 0, sizeof(uint16_t) * BUF_4K_LEN);
+    memset(ch3, 0, sizeof(uint16_t) * BUF_4K_LEN);
+    memset(ch4, 0, sizeof(uint16_t) * BUF_4K_LEN);
 
     std::cout << "Attempting to transfer a single block..." << std::endl;
 
-    transfer_single_block();
+    if (0 == dsoHTStartCollectData(dev_idx, 1)) {
+        std::cerr << "Failed to start data collection, aborting." << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    std::cout << "Waiting for transfer readiness" << std::endl;
+    while (!(dsoHTGetState(dev_idx) & 0x2));
+    std::cout << "Ready to transfer data" << std::endl;
+
+    transfer_single_block(ch1, ch2, ch3, ch4, &control);
 
     return EXIT_SUCCESS;
 }
