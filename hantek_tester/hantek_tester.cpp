@@ -12,13 +12,13 @@
 
 constexpr size_t FIRST_ENABLED_CHAN = 0;
 constexpr size_t NR_ENABLED_CHANS = 4;
-constexpr size_t CHANS_MASK = 0xf;
-constexpr int TRIGGER_CHANNEL = CH1;
+constexpr size_t CHANS_MASK = 0xf; // (1 << (FIRST_ENABLED_CHAN));
+constexpr int TRIGGER_CHANNEL = FIRST_ENABLED_CHAN;
 constexpr int TRIGGER_SLOPE = RISE;
 constexpr int TRIGGER_MODE = EDGE;
 constexpr int TRIGGER_COUPLE = AC;
 constexpr int CHANNEL_COUPLING = AC;
-constexpr int TIME_PER_DIVISION = 16; // 500 uS
+constexpr int TIME_PER_DIVISION = 8; //6; // 200ns | //16; // 500 uS
 constexpr int VOLTS_PER_DIVISION = 4; // 50 mV
 
 static
@@ -72,8 +72,8 @@ short find_and_setup_devs(PCONTROLDATA control_data)
 
     std::cout << "FPGA version: 0x" << std::ios::hex <<  std::setw(8) << std::setfill('0') << fpga_version << " Hardware version: 0x" << hard_version << std::endl;
 
-    std::cout << "Initializing ADC, press any key to go to the next step" << std::endl;
-    getchar();
+    //std::cout << "Initializing ADC, press any key to go to the next step" << std::endl;
+    //getchar();
 
     memset(calibration_data, 0, sizeof(calibration_data));
     
@@ -83,8 +83,8 @@ short find_and_setup_devs(PCONTROLDATA control_data)
         goto done;
     }
 
-    std::cout << "Set ADC mode to 1, press any key to continue..." << std::endl;
-    getchar();
+    std::cout << "Set ADC mode to " << NR_ENABLED_CHANS << ", press any key to continue..." << std::endl;
+    //getchar();
 
     // Read back the calibration data for the device
     if (0 == dsoHTReadCalibrationData(dev_idx, calibration_data, CAL_LEVEL_LEN)) {
@@ -92,8 +92,8 @@ short find_and_setup_devs(PCONTROLDATA control_data)
         goto done;
     }
 
-    std::cout << "Read back calibration data, press any key to continue..." << std::endl;
-    getchar();
+    //std::cout << "Read back calibration data, press any key to continue..." << std::endl;
+    //getchar();
 
     // Fill the calibration data in with magic numbers iff we don't have valid calibration data
     // Never hit this in my test cases...
@@ -139,7 +139,7 @@ short find_and_setup_devs(PCONTROLDATA control_data)
 
     // Set up the relay control
     memset(reinterpret_cast<void *>(&relay_control), 0, sizeof(relay_control));
-    for (size_t i = FIRST_ENABLED_CHAN; i < NR_ENABLED_CHANS; i++) {
+    for (size_t i = FIRST_ENABLED_CHAN; i < FIRST_ENABLED_CHAN + NR_ENABLED_CHANS; i++) {
         relay_control.bCHEnable[i] = 1;
         relay_control.nCHVoltDIV[i] = VOLTS_PER_DIVISION;
         relay_control.nCHCoupling[i] = CHANNEL_COUPLING;
@@ -149,8 +149,8 @@ short find_and_setup_devs(PCONTROLDATA control_data)
     relay_control.bTrigFilt = 0;
     relay_control.nALT = 0;
 
-    control_data->nCHSet = 0x1; // FIXME
-    control_data->nTimeDIV = TIME_PER_DIVISION; // Wat
+    control_data->nCHSet = CHANS_MASK;
+    control_data->nTimeDIV = TIME_PER_DIVISION;
     control_data->nTriggerSource = TRIGGER_CHANNEL;
     control_data->nHTriggerPos = 50;
     control_data->nVTriggerPos = 180;
@@ -166,8 +166,8 @@ short find_and_setup_devs(PCONTROLDATA control_data)
         goto done;
      }
 
-    std::cout << "Finished setting sample rate, press any key to continue..." << std::endl;
-    getchar();
+    //std::cout << "Finished setting sample rate, press any key to continue..." << std::endl;
+    //getchar();
 
     std::cout << "Setting CH and trigger" << std::endl;
     if (0 == dsoHTSetCHAndTrigger(dev_idx, &relay_control, control_data->nTimeDIV)) {
@@ -209,6 +209,7 @@ int transfer_single_block(uint16_t *ch1, uint16_t *ch2, uint16_t *ch3, uint16_t 
         std::cerr << "Failed to get data from DSO, aborting." << std::endl;
         goto done;
     }
+
 
     std::cout << "Transferred all 4 channels" << std::endl;
 done:
